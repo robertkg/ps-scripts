@@ -33,8 +33,8 @@ if (-not $PSBoundParameters.ContainsKey('LogPath')) {
         $toolName = 'InvokeDatabaseTool'
     }
 
-    # $env:TEMP\2021-05-11-MyDatabaseTool.txt    
-    $LogPath = "C:\Temp\$(Get-Date -Format yyyy-MM-dd_HH-mm)_$toolName.txt"
+    # E.g. file name: 2021-05-11_12-45_MyDatabaseTool.txt
+    $LogPath = "$env:TEMP\$(Get-Date -Format yyyy-MM-dd_HH-mm)_$toolName.txt"
 
     if (Test-Path $LogPath) {
         Write-Error "Log file $LogPath already exists"

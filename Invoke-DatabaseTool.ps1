@@ -1,11 +1,10 @@
-
 [CmdletBinding()]
 param (
     [Parameter(Mandatory, HelpMessage = 'Path to executable to run')]
     [System.IO.FileInfo]
     $ToolPath,
 
-    [Parameter(HelpMessage = 'Parameters to pass into the application')]
+    [Parameter(HelpMessage = 'Additional parameters to pass into the application')]
     [string[]]
     $ArgumentList,
 
@@ -22,7 +21,7 @@ param (
     $Wait
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 
 # Determine log path + name if not set
 if (-not $PSBoundParameters.ContainsKey('LogPath')) {
@@ -42,34 +41,45 @@ if (-not $PSBoundParameters.ContainsKey('LogPath')) {
 }
 
 $scriptBlock = {
-    $ErrorActionPreference = 'Stop'
+    $ErrorActionPreference = 'Continue' # Catch all output from the database tool and throw on last exit code check
 
     Write-Output @"
 --------------------------
-Username: $(($env:USERNAME).ToLower())
+Application: $using:ToolPath
+Arguments: $using:ArgumentList
+RunAs: $(($env:USERNAME).ToLower())
 PowerShell version: $($PSVersionTable.PSVersion.ToString())
-Application: $($using:ToolPath)
-Arguments: $($using:ArgumentList)
 --------------------------
 "@ | Tee-Object -FilePath $using:LogPath
-    
-    & $using:ToolPath $using:ArgumentList | Tee-Object -FilePath $using:LogPath -Append
 
-    if ($LASTEXITCODE -ne 0) {
-        exit 1
+    $stopwatch = [System.Diagnostics.Stopwatch]::new()
+    Write-Output "Start time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')"
+    Write-Output '------------------------------------------'
+    $stopwatch.Start()
+
+    & $using:ToolPath $using:ArgumentList *>&1 | Tee-Object -FilePath $using:LogPath -Append
+    $capturedExitCode = $LASTEXITCODE #
+
+    $stopwatch.Stop()
+    Write-Output '------------------------------------------'
+    Write-Output "Completion time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss') ($($stopwatch.Elapsed.ToString('hh\:mm\:ss')))"
+
+    if ($capturedExitCode -ne 0) {
+        Write-Error 'Tool failed'
     }
 }
 
 $jobParams = @{
     Name        = ([guid]::NewGuid().Guid -split '-')[0]
     ScriptBlock = $scriptBlock
+    ErrorAction = 'Continue'
 }
-
+    
 if ($PSBoundParameters.ContainsKey('Credential')) {
     $jobParams.Add('Credential', $Credential)
 }
 
-$job = Start-Job @jobParams
+$job = Start-Job @jobParams 
 
 if ($PSBoundParameters.ContainsKey('Wait')) {
     Receive-Job -Job $job -Wait

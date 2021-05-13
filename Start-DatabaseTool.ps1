@@ -1,16 +1,28 @@
+<#
+.SYNOPSIS
+    Starts a job that runs a given database tool and writes the output to a log file.
+.DESCRIPTION
+    This script spawns a new PowerShell job on the local machine that runs a given database tool executable.
+    The output streams (stdout, stderr) is written to the output stream and to a log file on the system.
+    Arguments should be provided as an array.
+    To run in a different security context, e.g. a service account with elevated DB permissions, provide
+    the Credential parameter.
+.EXAMPLE
+    PS C:\> .\Start-DatabaseTool.ps1 -FilePath C:\DatabaseTool.exe -ArgumentList '--database=mydb', '--dryrun' -Credential $cred
+
+    This command runs a database tool against database mydb without making any changes. The job spawned by the command
+    will be run in the security context stored in the $cred variable.
+#>
+
 [CmdletBinding()]
 param (
     [Parameter(Mandatory, HelpMessage = 'Path to executable to run')]
     [System.IO.FileInfo]
-    $ToolPath,
+    $FilePath,
 
     [Parameter(HelpMessage = 'Additional parameters to pass into the application')]
     [string[]]
     $ArgumentList,
-
-    [Parameter(HelpMessage = 'Path to log file for tool output')]
-    [System.IO.FileInfo]
-    $LogPath,
 
     [Parameter(HelpMessage = 'Credentials for the user account to impersonate')]
     [pscredential]
@@ -18,18 +30,25 @@ param (
 
     [Parameter(HelpMessage = 'Wait for database tool to complete and write output')]
     [switch]
-    $Wait
+    $Wait,
+
+    [Parameter(HelpMessage = 'Path to log file for tool output')]
+    [System.IO.FileInfo]
+    $LogPath
+
 )
 
 $ErrorActionPreference = 'Continue'
 
+$guid = ([guid]::NewGuid().Guid -split '-')[0]
+
 # Determine log path + name if not set
 if (-not $PSBoundParameters.ContainsKey('LogPath')) {
-    $toolName = [io.path]::GetFileNameWithoutExtension($ToolPath)
+    $toolName = [io.path]::GetFileNameWithoutExtension($FilePath)
 
     # Fallback
     if ([string]::IsNullOrEmpty($toolName)) {
-        $toolName = 'InvokeDatabaseTool'
+        $toolName = "DatabaseTool-$guid"
     }
 
     # E.g. file name: 2021-05-11_12-45_MyDatabaseTool.txt
@@ -45,19 +64,18 @@ $scriptBlock = {
 
     Write-Output @"
 --------------------------
-Application: $using:ToolPath
+Application: $using:FilePath
 Arguments: $using:ArgumentList
 RunAs: $(($env:USERNAME).ToLower())
 PowerShell version: $($PSVersionTable.PSVersion.ToString())
+Start time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')
 --------------------------
 "@ | Tee-Object -FilePath $using:LogPath
 
     $stopwatch = [System.Diagnostics.Stopwatch]::new()
-    Write-Output "Start time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')"
-    Write-Output '------------------------------------------'
     $stopwatch.Start()
 
-    & $using:ToolPath $using:ArgumentList *>&1 | Tee-Object -FilePath $using:LogPath -Append
+    & $using:FilePath $using:ArgumentList *>&1 | Tee-Object -FilePath $using:LogPath -Append
     $capturedExitCode = $LASTEXITCODE #
 
     $stopwatch.Stop()
@@ -65,12 +83,12 @@ PowerShell version: $($PSVersionTable.PSVersion.ToString())
     Write-Output "Completion time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss') ($($stopwatch.Elapsed.ToString('hh\:mm\:ss')))"
 
     if ($capturedExitCode -ne 0) {
-        Write-Error 'Tool failed'
+        throw 'Database tool failed'
     }
 }
 
 $jobParams = @{
-    Name        = ([guid]::NewGuid().Guid -split '-')[0]
+    Name        = $guid
     ScriptBlock = $scriptBlock
     ErrorAction = 'Continue'
 }

@@ -2,15 +2,11 @@
 param (
     [Parameter(Mandatory, HelpMessage = 'Path to executable to run')]
     [System.IO.FileInfo]
-    $ToolPath,
+    $FilePath,
 
     [Parameter(HelpMessage = 'Additional parameters to pass into the application')]
     [string[]]
     $ArgumentList,
-
-    [Parameter(HelpMessage = 'Path to log file for tool output')]
-    [System.IO.FileInfo]
-    $LogPath,
 
     [Parameter(HelpMessage = 'Credentials for the user account to impersonate')]
     [pscredential]
@@ -18,18 +14,25 @@ param (
 
     [Parameter(HelpMessage = 'Wait for database tool to complete and write output')]
     [switch]
-    $Wait
+    $Wait,
+
+    [Parameter(HelpMessage = 'Path to log file for tool output')]
+    [System.IO.FileInfo]
+    $LogPath
+
 )
 
 $ErrorActionPreference = 'Continue'
 
+$guid = ([guid]::NewGuid().Guid -split '-')[0]
+
 # Determine log path + name if not set
 if (-not $PSBoundParameters.ContainsKey('LogPath')) {
-    $toolName = [io.path]::GetFileNameWithoutExtension($ToolPath)
+    $toolName = [io.path]::GetFileNameWithoutExtension($FilePath)
 
     # Fallback
     if ([string]::IsNullOrEmpty($toolName)) {
-        $toolName = 'InvokeDatabaseTool'
+        $toolName = "DatabaseTool-$guid"
     }
 
     # E.g. file name: 2021-05-11_12-45_MyDatabaseTool.txt
@@ -45,19 +48,18 @@ $scriptBlock = {
 
     Write-Output @"
 --------------------------
-Application: $using:ToolPath
+Application: $using:FilePath
 Arguments: $using:ArgumentList
 RunAs: $(($env:USERNAME).ToLower())
 PowerShell version: $($PSVersionTable.PSVersion.ToString())
+Start time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')
 --------------------------
 "@ | Tee-Object -FilePath $using:LogPath
 
     $stopwatch = [System.Diagnostics.Stopwatch]::new()
-    Write-Output "Start time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss')"
-    Write-Output '------------------------------------------'
     $stopwatch.Start()
 
-    & $using:ToolPath $using:ArgumentList *>&1 | Tee-Object -FilePath $using:LogPath -Append
+    & $using:FilePath $using:ArgumentList *>&1 | Tee-Object -FilePath $using:LogPath -Append
     $capturedExitCode = $LASTEXITCODE #
 
     $stopwatch.Stop()
@@ -65,12 +67,12 @@ PowerShell version: $($PSVersionTable.PSVersion.ToString())
     Write-Output "Completion time: $(Get-Date -Format 'dd.MM.yyyy HH:mm:ss') ($($stopwatch.Elapsed.ToString('hh\:mm\:ss')))"
 
     if ($capturedExitCode -ne 0) {
-        Write-Error 'Tool failed'
+        throw 'Database tool failed'
     }
 }
 
 $jobParams = @{
-    Name        = ([guid]::NewGuid().Guid -split '-')[0]
+    Name        = $guid
     ScriptBlock = $scriptBlock
     ErrorAction = 'Continue'
 }

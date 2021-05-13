@@ -1,3 +1,19 @@
+<#
+.SYNOPSIS
+    Starts a job that runs a given database tool and writes the output to a log file.
+.DESCRIPTION
+    This script spawns a new PowerShell job on the local machine that runs a given database tool executable.
+    The output streams (stdout, stderr) is written to the output stream and to a log file on the system.
+    Arguments should be provided as an array.
+    To run in a different security context, e.g. a service account with elevated DB permissions, provide
+    the Credential parameter.
+.EXAMPLE
+    PS C:\> .\Start-DatabaseTool.ps1 -FilePath C:\DatabaseTool.exe -ArgumentList '--database=mydb', '--dryrun' -Credential $cred
+
+    This command runs a database tool against database mydb without making any changes. The job spawned by the command
+    will be run in the security context stored in the $cred variable.
+#>
+
 [CmdletBinding()]
 param (
     [Parameter(Mandatory, HelpMessage = 'Path to executable to run')]
